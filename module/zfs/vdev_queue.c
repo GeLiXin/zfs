@@ -249,12 +249,23 @@ static int
 vdev_queue_max_async_writes(spa_t *spa)
 {
 	int writes;
-	uint64_t dirty = spa->spa_dsl_pool->dp_dirty_total;
+	uint64_t dirty = 0;
 	uint64_t min_bytes = zfs_dirty_data_max *
 	    zfs_vdev_async_write_active_min_dirty_percent / 100;
 	uint64_t max_bytes = zfs_dirty_data_max *
 	    zfs_vdev_async_write_active_max_dirty_percent / 100;
 
+	/*
+	 * async writes may be issued before the pool finish the process of 
+	 * initialization, which means we can't get the statistics of dirty 
+	 * data from the spa. typically this happens when the self-healing 
+	 * zio was issued by mirror while importing. we push data out as fast 
+	 * as possible to speed up the import.
+	 */
+	if (spa_load_state(spa) != SPA_LOAD_NONE) {
+		return (zfs_vdev_async_write_max_active);
+	}
+	
 	/*
 	 * Sync tasks correspond to interactive user actions. To reduce the
 	 * execution time of those actions we push data out as fast as possible.
@@ -263,6 +274,7 @@ vdev_queue_max_async_writes(spa_t *spa)
 		return (zfs_vdev_async_write_max_active);
 	}
 
+	dirty = spa->spa_dsl_pool->dp_dirty_total;
 	if (dirty < min_bytes)
 		return (zfs_vdev_async_write_min_active);
 	if (dirty > max_bytes)
